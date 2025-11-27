@@ -164,6 +164,7 @@ public class AdminScreen implements GameClient.MessageListener {
         List<String> playerNames = new ArrayList<>();
 
         if (playerFields.size() != playerCount) {
+
             JOptionPane.showMessageDialog(frame, "Player fields mismatch", "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
