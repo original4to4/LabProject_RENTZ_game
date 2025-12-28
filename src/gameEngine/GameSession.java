@@ -6,13 +6,16 @@ import cards.*;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * GameSession for local multiplayer
+ * Simplified: No network support, only local play
+ */
 public class GameSession {
     private int sessionId;
     private GameType selectedGame;
     private ArrayList<InGamePlayer> players;
     private int currentPlayerIndex;
     private ArrayList<Card> currentRound;
-    private Map<InGamePlayer, Card> currentRoundCards;
     private char leadingSuit;
     private boolean gameStarted;
     private InGamePlayer roundWinner;
@@ -25,14 +28,20 @@ public class GameSession {
     private List<GameSessionListener> listeners;
     private boolean gameCompleted;
     private InGamePlayer gameWinner;
-    private Map<String, Boolean> playerReadyStatus;
-    private boolean isNetworkGame;
+    private int currentRoundStartPlayer; // Track which player started the current round
+    private PointsCalculator pointsCalculator; // Points calculator instance
 
     // --- Constructors ---
 
     public GameSession(ArrayList<Player> players) {
         if (players == null || players.size() < 2 || players.size() > 6) {
             throw new IllegalArgumentException("Number of players must be between 2 and 6");
+        }
+
+        for (Player player : players) {
+            if (player.getName() == null || player.getName().trim().isEmpty()) {
+                throw new IllegalArgumentException("All players must have valid names");
+            }
         }
 
         this.players = new ArrayList<>();
@@ -43,25 +52,17 @@ public class GameSession {
 
         this.playerNumber = this.players.size();
         this.deck = new DeckOfCards(playerNumber);
-        initCommon();
-    }
-
-    public GameSession() {
-        this.players = new ArrayList<>();
-        this.playerNumber = 0;
-        this.deck = null;
+        this.pointsCalculator = new PointsCalculator(); // Initialize points calculator
         initCommon();
     }
 
     private void initCommon() {
         this.currentRound = new ArrayList<>();
-        this.currentRoundCards = new LinkedHashMap<>();
         this.scores = new HashMap<>();
         this.listeners = new CopyOnWriteArrayList<>();
         this.totalRounds = 8;
-        this.playerReadyStatus = new HashMap<>();
-        this.isNetworkGame = false;
         this.currentPlayerIndex = 0;
+        this.currentRoundStartPlayer = 0; // Start with first player
         this.leadingSuit = 0;
         this.gameStarted = false;
         this.roundInProgress = false;
@@ -70,125 +71,88 @@ public class GameSession {
 
         for (InGamePlayer igp : this.players) {
             scores.put(igp, 0);
-            playerReadyStatus.put(igp.getPlayer().getName(), false);
         }
     }
 
-    // --- Getters/Setters ---
+    // --- Meta ---
     public int getSessionId() { return sessionId; }
     public void setSessionId(int sessionId) { this.sessionId = sessionId; }
 
     public GameType getSelectedGame() { return selectedGame; }
     public void setSelectedGame(GameType selectedGame) {
         this.selectedGame = selectedGame;
-        notifyGameSelected(selectedGame);
+        notifyGameSelected();
     }
 
-    public boolean isNetworkGame() { return isNetworkGame; }
-    public void setNetworkGame(boolean networkGame) { isNetworkGame = networkGame; }
-
-    public List<InGamePlayer> getPlayers() { return Collections.unmodifiableList(players); }
+    public List<InGamePlayer> getPlayers() {
+        return Collections.unmodifiableList(players);
+    }
 
     public InGamePlayer getCurrentPlayer() {
         if (players.isEmpty()) return null;
         return players.get(currentPlayerIndex);
     }
 
-    public char getLeadingSuit() { return leadingSuit; }
-
-    public Map<InGamePlayer, Card> getCurrentRoundCards() {
-        return Collections.unmodifiableMap(currentRoundCards);
+    public int getCurrentPlayerIndex() {
+        return currentPlayerIndex;
     }
 
-    public ArrayList<Card> getCurrentRound() { return currentRound; }
+    public boolean isGameStarted() {
+        return gameStarted;
+    }
 
-    public int getRoundsPlayed() { return roundsPlayed; }
+    public boolean isGameOver() {
+        return gameCompleted;
+    }
 
-    public int getTotalRounds() { return totalRounds; }
+    public InGamePlayer getGameWinner() {
+        return gameWinner;
+    }
 
-    public Map<InGamePlayer, Integer> getScores() { return Collections.unmodifiableMap(scores); }
+    public int getRoundsPlayed() {
+        return roundsPlayed;
+    }
 
-    public boolean isRoundInProgress() { return roundInProgress; }
+    public int getTotalRounds() {
+        return totalRounds;
+    }
 
-    public boolean isGameOver() { return gameCompleted; }
+    public boolean isRoundInProgress() {
+        return roundInProgress;
+    }
 
-    public InGamePlayer getGameWinner() { return gameWinner; }
+    public Map<InGamePlayer, Integer> getScores() {
+        return Collections.unmodifiableMap(scores);
+    }
 
-    // --- Player management ---
+    public char getLeadingSuit() {
+        return leadingSuit;
+    }
 
-    public synchronized boolean addPlayer(Player player) {
-        if (player == null) return false;
-        if (players.size() >= 6) {
-            System.out.println("Cannot add player - maximum players reached");
-            return false;
+    public String getLeadingSuitName() {
+        switch(leadingSuit) {
+            case 'H': return "Hearts ♥";
+            case 'S': return "Spades ♠";
+            case 'D': return "Diamonds ♦";
+            case 'C': return "Clubs ♣";
+            default: return "None";
         }
-        for (InGamePlayer p : players) {
-            if (p.getPlayer().getName().equals(player.getName())) {
-                System.out.println("Player already exists in session: " + player.getName());
-                return false;
-            }
+    }
+
+    public ArrayList<Card> getCurrentRoundCards() {
+        return new ArrayList<>(currentRound);
+    }
+
+    public Map<InGamePlayer, Card> getCurrentRoundCardsByPlayer() {
+        Map<InGamePlayer, Card> result = new HashMap<>();
+
+        for (int i = 0; i < currentRound.size(); i++) {
+            // Calculate which player played this card (based on round start)
+            int playerIndex = (currentRoundStartPlayer + i) % players.size();
+            result.put(players.get(playerIndex), currentRound.get(i));
         }
 
-        InGamePlayer newPlayer = new InGamePlayer(player);
-        players.add(newPlayer);
-        scores.put(newPlayer, 0);
-        playerReadyStatus.put(player.getName(), false);
-
-        this.playerNumber = players.size();
-        if (!gameStarted) this.deck = new DeckOfCards(playerNumber);
-
-        System.out.println("Added player to session: " + player.getName());
-        return true;
-    }
-
-    public synchronized boolean removePlayerByName(String playerName) {
-        Iterator<InGamePlayer> it = players.iterator();
-        boolean removed = false;
-        while (it.hasNext()) {
-            InGamePlayer igp = it.next();
-            if (igp.getPlayer().getName().equals(playerName)) {
-                it.remove();
-                scores.remove(igp);
-                playerReadyStatus.remove(playerName);
-                removed = true;
-                break;
-            }
-        }
-        if (removed) {
-            this.playerNumber = players.size();
-            this.deck = playerNumber > 0 ? new DeckOfCards(playerNumber) : null;
-        }
-        return removed;
-    }
-
-    public InGamePlayer getPlayerByName(String name) {
-        for (InGamePlayer igp : players) {
-            if (igp.getPlayer().getName().equals(name)) return igp;
-        }
-        return null;
-    }
-
-    // --- Ready tracking ---
-    public synchronized void setPlayerReady(String playerName, boolean ready) {
-        playerReadyStatus.put(playerName, ready);
-        if (ready) notifyPlayerReady(playerName);
-    }
-
-    public void setPlayerReady(String playerName) {
-        setPlayerReady(playerName, true);
-    }
-
-    public synchronized boolean areAllJoinedPlayersReady() {
-        if (players.isEmpty()) return false;
-        for (InGamePlayer igp : players) {
-            Boolean r = playerReadyStatus.get(igp.getPlayer().getName());
-            if (r == null || !r) return false;
-        }
-        return true;
-    }
-
-    public boolean allPlayersReady() {
-        return areAllJoinedPlayersReady();
+        return result;
     }
 
     // --- Game lifecycle ---
@@ -202,6 +166,7 @@ public class GameSession {
         this.gameStarted = true;
         this.roundsPlayed = 0;
         this.currentPlayerIndex = 0;
+        this.currentRoundStartPlayer = 0; // First player starts
         this.totalRounds = 8;
 
         this.deck = new DeckOfCards(players.size());
@@ -213,6 +178,7 @@ public class GameSession {
             igp.getTakenCards().clear();
         }
 
+        // Deal 8 cards to each player
         for (int r = 0; r < totalRounds; r++) {
             for (InGamePlayer igp : players) {
                 Card c = deck.drawCard();
@@ -223,33 +189,28 @@ public class GameSession {
         scores.clear();
         for (InGamePlayer igp : players) scores.put(igp, 0);
 
-        roundInProgress = true;
         notifyGameStarted();
         System.out.println("GameSession " + sessionId + " started with " + players.size() + " players");
         return true;
     }
 
-    public boolean isGameStarted() { return gameStarted; }
-
-    // --- Game actions ---
-
-    public void selectGame(GameType gameType, InGamePlayer player) {
-        this.selectedGame = gameType;
-        notifyGameSelected(gameType);
-    }
-
-    public void selectGame(GameType gameType) {
-        this.selectedGame = gameType;
-        notifyGameSelected(gameType);
-    }
-
+    // --- Gameplay methods ---
     public synchronized boolean playCard(InGamePlayer player, Card card) {
-        return playCard(player, card, true);
-    }
+        if (!gameStarted || gameCompleted) {
+            return false;
+        }
 
-    public synchronized boolean playCard(InGamePlayer player, Card card, boolean notifyListeners) {
+        if (!players.contains(player)) {
+            return false;
+        }
+
+        // Check if it's this player's turn
+        if (players.get(currentPlayerIndex) != player) {
+            return false;
+        }
+
+        // Validate the move
         if (!isValidMove(player, card)) {
-            System.out.println("Invalid move by " + player.getPlayer().getName());
             return false;
         }
 
@@ -258,164 +219,180 @@ public class GameSession {
 
         // Add to current round
         currentRound.add(card);
-        currentRoundCards.put(player, card);
 
-        // Set leading suit if this is first card
+        // Set leading suit if first card of round
         if (currentRound.size() == 1) {
             leadingSuit = card.getCardSuit();
+            roundInProgress = true;
+            // Track who started this round
+            currentRoundStartPlayer = currentPlayerIndex;
         }
 
-        if (notifyListeners) {
-            notifyCardPlayed(card);
-        }
+        // Notify card played
+        notifyCardPlayed(card);
+
+        // Move to next player
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
 
         // Check if round is complete
         if (currentRound.size() == players.size()) {
             completeRound();
-            return true;
+        } else {
+            // Notify player change
+            notifyPlayerChanged(players.get(currentPlayerIndex));
         }
 
-        // Move to next player
-        currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
-        notifyPlayerChanged(getCurrentPlayer());
-
-        return false;
+        return true;
     }
 
     private void completeRound() {
-        // Determine winner
-        InGamePlayer winner = determineRoundWinner();
-        roundWinner = winner;
+        // Determine round winner (highest card of leading suit)
+        int winningCardIndex = 0;
+        Card winningCard = currentRound.get(0);
 
-        // Give cards to winner
-        for (Card card : currentRound) {
-            winner.getTakenCards().add(card);
-        }
-
-        // Calculate and update scores
-        if (selectedGame != null) {
-            PointsCalculator calculator = new PointsCalculator();
-            int points = calculator.calculate(
-                    new ArrayList<>(winner.getTakenCards()),
-                    selectedGame.getCode(),
-                    players.size()
-            );
-            scores.put(winner, points);
-        }
-
-        notifyRoundCompleted(winner);
-
-        // Clear round
-        currentRound.clear();
-        currentRoundCards.clear();
-        leadingSuit = 0;
-        roundsPlayed++;
-
-        // Check if game is over
-        if (roundsPlayed >= totalRounds || allHandsEmpty()) {
-            endGame();
-        } else {
-            // Winner starts next round
-            currentPlayerIndex = players.indexOf(winner);
-            notifyPlayerChanged(getCurrentPlayer());
-        }
-    }
-
-    private InGamePlayer determineRoundWinner() {
-        if (currentRound.isEmpty()) return null;
-
-        Card winningCard = null;
-        InGamePlayer winner = null;
-
-        for (Map.Entry<InGamePlayer, Card> entry : currentRoundCards.entrySet()) {
-            Card card = entry.getValue();
-
-            if (winningCard == null) {
-                winningCard = card;
-                winner = entry.getKey();
-            } else {
-                // Card of leading suit with higher value wins
-                if (card.getCardSuit() == leadingSuit) {
-                    if (winningCard.getCardSuit() != leadingSuit ||
-                            card.getCardNumber() > winningCard.getCardNumber()) {
-                        winningCard = card;
-                        winner = entry.getKey();
-                    }
+        for (int i = 1; i < currentRound.size(); i++) {
+            Card currentCard = currentRound.get(i);
+            if (currentCard.getCardSuit() == leadingSuit) {
+                if (currentCard.getCardNumber() > winningCard.getCardNumber()) {
+                    winningCard = currentCard;
+                    winningCardIndex = i;
                 }
             }
         }
 
-        return winner;
+        // Calculate the actual winner player index
+        int winnerPlayerIndex = (currentRoundStartPlayer + winningCardIndex) % players.size();
+        roundWinner = players.get(winnerPlayerIndex);
+
+        // Add cards to winner's taken cards
+        for (Card card : currentRound) {
+            roundWinner.getTakenCards().add(card);
+        }
+
+        // Calculate points for winner using the PointsCalculator
+        if (selectedGame != null && pointsCalculator != null) {
+            // Calculate points based on cards won THIS ROUND
+            int roundPoints = pointsCalculator.calculate(currentRound,
+                    selectedGame.getCode(),
+                    players.size());
+
+            // Update score
+            int currentScore = scores.getOrDefault(roundWinner, 0);
+            scores.put(roundWinner, currentScore + roundPoints);
+
+            System.out.println("Round " + (roundsPlayed + 1) + " - " +
+                    roundWinner.getPlayer().getName() + " won with " +
+                    winningCard.description() + ". Points: " + roundPoints +
+                    " (Total: " + (currentScore + roundPoints) + ")");
+        } else {
+            System.out.println("Warning: Game type not selected or points calculator not available");
+        }
+
+        // Notify round completed
+        notifyRoundCompleted(roundWinner);
+
+        // Reset for next round
+        currentRound.clear();
+        leadingSuit = 0;
+        roundInProgress = false;
+        roundsPlayed++;
+
+        // Check if game is over
+        if (roundsPlayed >= totalRounds) {
+            endGame();
+        } else {
+            // Set next round's starting player to round winner
+            currentPlayerIndex = winnerPlayerIndex;
+            currentRoundStartPlayer = winnerPlayerIndex; // Winner starts next round
+            notifyPlayerChanged(players.get(currentPlayerIndex));
+        }
     }
 
     private void endGame() {
         gameCompleted = true;
-        roundInProgress = false;
 
-        // Determine overall winner (highest score)
+        // Determine game winner (highest score)
         InGamePlayer winner = null;
         int highestScore = Integer.MIN_VALUE;
+        boolean tie = false;
+        List<InGamePlayer> tiedWinners = new ArrayList<>();
 
         for (Map.Entry<InGamePlayer, Integer> entry : scores.entrySet()) {
-            if (entry.getValue() > highestScore) {
-                highestScore = entry.getValue();
+            int score = entry.getValue();
+            if (score > highestScore) {
+                highestScore = score;
                 winner = entry.getKey();
+                tiedWinners.clear();
+                tiedWinners.add(entry.getKey());
+                tie = false;
+            } else if (score == highestScore) {
+                tie = true;
+                tiedWinners.add(entry.getKey());
             }
         }
 
-        gameWinner = winner;
+        if (tie && tiedWinners.size() > 1) {
+            // If there's a tie, winner is null (no single winner)
+            gameWinner = null;
+            System.out.println("Game over! Tie between: " +
+                    tiedWinners.stream()
+                            .map(p -> p.getPlayer().getName())
+                            .reduce((a, b) -> a + ", " + b)
+                            .orElse("") +
+                    " with score: " + highestScore);
+        } else {
+            gameWinner = winner;
+            System.out.println("Game over! Winner: " +
+                    (winner != null ? winner.getPlayer().getName() : "None") +
+                    " with score: " + highestScore);
+        }
+
+        // Calculate final game bonus (if any)
+        if (selectedGame != null && pointsCalculator != null) {
+            // Calculate any final game bonuses
+            // This might include points for remaining cards or special conditions
+            // For now, just use the accumulated scores
+        }
+
+        // Notify game over
         notifyGameOver(scores);
     }
 
-    private boolean allHandsEmpty() {
-        for (InGamePlayer player : players) {
-            if (!player.getHand().hand.isEmpty()) return false;
-        }
-        return true;
-    }
-
+    // --- Validation methods ---
     public boolean isValidMove(InGamePlayer player, Card card) {
-        if (player != getCurrentPlayer()) return false;
-        if (!player.getHand().hand.contains(card)) return false;
-        if (selectedGame == null) return false;
-
-        // If leading suit is set, must follow suit if possible
-        if (leadingSuit != 0 && card.getCardSuit() != leadingSuit) {
-            return !playerHasSuit(player, leadingSuit);
+        if (!player.getHand().hand.contains(card)) {
+            return false;
         }
 
+        // If no leading suit yet, any card is valid
+        if (leadingSuit == 0) {
+            return true;
+        }
+
+        // If player has cards of leading suit, must follow suit
+        boolean hasLeadingSuit = false;
+        for (Card c : player.getHand().hand) {
+            if (c.getCardSuit() == leadingSuit) {
+                hasLeadingSuit = true;
+                break;
+            }
+        }
+
+        if (hasLeadingSuit) {
+            return card.getCardSuit() == leadingSuit;
+        }
+
+        // Player doesn't have leading suit, can play any card
         return true;
     }
 
     public boolean playerHasSuit(InGamePlayer player, char suit) {
-        for (Card card : player.getHand().hand) {
-            if (card.getCardSuit() == suit) return true;
+        for (Card c : player.getHand().hand) {
+            if (c.getCardSuit() == suit) {
+                return true;
+            }
         }
         return false;
-    }
-
-    public String getLeadingSuitName() {
-        switch (leadingSuit) {
-            case 'H': return "Hearts (♥)";
-            case 'S': return "Spades (♠)";
-            case 'D': return "Diamonds (♦)";
-            case 'C': return "Clubs (♣)";
-            default: return "None";
-        }
-    }
-
-    public boolean isAIPlayer(String playerName) {
-        // For now, no AI players in network mode
-        return false;
-    }
-
-    public void playAITurn() {
-        // Placeholder for AI logic
-        InGamePlayer currentPlayer = getCurrentPlayer();
-        if (currentPlayer != null && !currentPlayer.getHand().hand.isEmpty()) {
-            Card card = currentPlayer.getHand().hand.get(0);
-            playCard(currentPlayer, card);
-        }
     }
 
     // --- Listener management ---
@@ -429,47 +406,41 @@ public class GameSession {
 
     private void notifyGameStarted() {
         for (GameSessionListener l : listeners) {
-            try { l.onGameStarted(); } catch (Exception e) { e.printStackTrace(); }
+            try { l.onGameStarted(); } catch (Exception ignored) {}
         }
     }
 
     private void notifyCardPlayed(Card c) {
         for (GameSessionListener l : listeners) {
-            try { l.onCardPlayed(c); } catch (Exception e) { e.printStackTrace(); }
+            try { l.onCardPlayed(c); } catch (Exception ignored) {}
         }
     }
 
     private void notifyRoundCompleted(InGamePlayer winner) {
         for (GameSessionListener l : listeners) {
-            try { l.onRoundCompleted(winner); } catch (Exception e) { e.printStackTrace(); }
+            try { l.onRoundCompleted(winner); } catch (Exception ignored) {}
         }
     }
 
     private void notifyGameOver(Map<InGamePlayer, Integer> scores) {
         for (GameSessionListener l : listeners) {
-            try { l.onGameOver(scores); } catch (Exception e) { e.printStackTrace(); }
+            try { l.onGameOver(scores); } catch (Exception ignored) {}
         }
     }
 
-    private void notifyPlayerChanged(InGamePlayer player) {
+    private void notifyPlayerChanged(InGamePlayer currentPlayer) {
         for (GameSessionListener l : listeners) {
-            try { l.onPlayerChanged(player); } catch (Exception e) { e.printStackTrace(); }
+            try { l.onPlayerChanged(currentPlayer); } catch (Exception ignored) {}
         }
     }
 
-    private void notifyGameSelected(GameType gameType) {
+    private void notifyGameSelected() {
         for (GameSessionListener l : listeners) {
-            try { l.onGameSelected(gameType); } catch (Exception e) { e.printStackTrace(); }
+            try { l.onGameSelected(selectedGame); } catch (Exception ignored) {}
         }
     }
 
-    private void notifyPlayerReady(String playerName) {
-        for (GameSessionListener l : listeners) {
-            try { l.onPlayerReady(playerName); } catch (Exception e) { e.printStackTrace(); }
-        }
-    }
-
-    // --- Helpers for server ---
+    // --- Utility methods ---
     public Map<String, Integer> getScoresAsMap() {
         Map<String, Integer> map = new HashMap<>();
         for (Map.Entry<InGamePlayer, Integer> e : scores.entrySet()) {
@@ -478,7 +449,76 @@ public class GameSession {
         return map;
     }
 
-    public Map<String, Boolean> getPlayerReadyStatus() {
-        return Collections.unmodifiableMap(playerReadyStatus);
+    public InGamePlayer getPlayerByName(String name) {
+        for (InGamePlayer igp : players) {
+            if (igp.getPlayer().getName().equals(name)) return igp;
+        }
+        return null;
+    }
+
+    public boolean isAIPlayer(String playerName) {
+        // In local multiplayer, no AI players by default
+        // This can be extended if AI support is added later
+        return false;
+    }
+
+    // Get the winner's name for display (handles ties)
+    public String getWinnerDisplayName() {
+        if (gameWinner != null) {
+            return gameWinner.getPlayer().getName();
+        } else {
+            // Find tied winners
+            int highestScore = Integer.MIN_VALUE;
+            List<String> tiedWinners = new ArrayList<>();
+
+            for (Map.Entry<InGamePlayer, Integer> entry : scores.entrySet()) {
+                int score = entry.getValue();
+                if (score > highestScore) {
+                    highestScore = score;
+                    tiedWinners.clear();
+                    tiedWinners.add(entry.getKey().getPlayer().getName());
+                } else if (score == highestScore) {
+                    tiedWinners.add(entry.getKey().getPlayer().getName());
+                }
+            }
+
+            if (tiedWinners.size() == 1) {
+                return tiedWinners.get(0);
+            } else if (tiedWinners.size() > 1) {
+                return String.join(", ", tiedWinners) + " (Tie)";
+            }
+        }
+        return "No winner";
+    }
+
+    // For AI turn simulation (if needed in future)
+    public void playAITurn() {
+        // Not implemented for local multiplayer without AI
+        // Could be added later
+    }
+
+    // Method to manually advance turn (for testing or special cases)
+    public synchronized void advanceTurn() {
+        if (!gameStarted || gameCompleted) return;
+
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
+        notifyPlayerChanged(players.get(currentPlayerIndex));
+    }
+
+    // Get final scores for popup display
+    public String getFinalScoresForDisplay() {
+        StringBuilder sb = new StringBuilder("<html><b>Game Over! Final Scores:</b><br><br>");
+
+        // Sort players by score (highest first)
+        List<Map.Entry<InGamePlayer, Integer>> sortedEntries = new ArrayList<>(scores.entrySet());
+        sortedEntries.sort((a, b) -> b.getValue().compareTo(a.getValue()));
+
+        for (Map.Entry<InGamePlayer, Integer> entry : sortedEntries) {
+            sb.append("<b>").append(entry.getKey().getPlayer().getName()).append(":</b> ")
+                    .append(entry.getValue()).append(" points<br>");
+        }
+
+        sb.append("<br><b>Winner: ").append(getWinnerDisplayName()).append("</b></html>");
+        return sb.toString();
     }
 }

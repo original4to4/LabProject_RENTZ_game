@@ -1,3 +1,4 @@
+/*
 package network;
 
 import java.io.*;
@@ -199,3 +200,4 @@ public class GameClient {
     public String getClientId() { return clientId; }
     public String getPlayerName() { return playerName; }
 }
+*/

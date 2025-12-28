@@ -1,3 +1,4 @@
+/*
 package network;
 
 import gameEngine.GameSession;
@@ -14,12 +15,14 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
 
+*/
 /**
  * GameServer (phase 1 core)
  * - uses UserRepository.usernameExists(...) for player validation
  * - no chat support
  * - provides inner data classes (SessionData, PlayerJoinData, PlayerHandData, GameStartData...)
- */
+ *//*
+
 public class GameServer {
     private ServerSocket serverSocket;
     private final Map<Integer, GameSession> activeSessions = new ConcurrentHashMap<>();
@@ -642,3 +645,4 @@ public class GameServer {
         return players != null && players.contains(playerName);
     }
 }
+*/

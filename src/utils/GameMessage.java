@@ -1,3 +1,4 @@
+/*
 package network;
 
 import gameEngine.GameType;
@@ -250,4 +251,4 @@ public class GameMessage implements Serializable {
             this.message = message;
         }
     }
-}
+}*/
