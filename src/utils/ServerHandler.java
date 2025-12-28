@@ -1,3 +1,4 @@
+/*
 package network;
 
 import java.io.*;
@@ -89,4 +90,4 @@ public class ServerHandler {
             try { socket.close(); } catch (IOException ignored) {}
         }
     }
-}
+}*/

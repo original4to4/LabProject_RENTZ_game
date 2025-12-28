@@ -10,58 +10,41 @@ import java.util.ArrayList;
 import cards.*;
 import gameEngine.*;
 import user.InGamePlayer;
-import network.GameClient;
-import network.GameMessage;
 
-public class GameScreen implements GameSessionListener, GameClient.MessageListener {
+/**
+ * GameScreen for local multiplayer
+ * Simplified UI with no network or chat components
+ */
+public class GameScreen implements GameSessionListener {
     private JFrame frame;
     private JPanel mainPanel;
     private JPanel playerHandPanel;
     private JPanel playedCardsPanel;
     private JPanel gameInfoPanel;
     private JPanel scorePanel;
-    private JButton chooseGameButton;
-    private JButton readyButton;
-    private JButton startGameButton;
+    private JButton okButton;
     private JLabel gameInfoLabel;
     private JLabel currentPlayerLabel;
     private JLabel roundInfoLabel;
     private JLabel leadingSuitLabel;
     private JLabel statusLabel;
+    private JLabel turnIndicatorLabel;
 
     private GameSession gameSession;
     private InGamePlayer currentUser;
-    private GameClient gameClient;
     private Timer gameTimer;
     private boolean cardsEnabled = false;
-    private boolean isNetworkGame = false;
-    private int currentSessionId = -1;
+    private boolean isUsersTurn = false;
 
     public GameScreen(GameSession gameSession, InGamePlayer currentUser) {
-        this(gameSession, currentUser, null);
-    }
-
-    public GameScreen(GameSession gameSession, InGamePlayer currentUser, GameClient gameClient) {
         this.gameSession = gameSession;
         this.currentUser = currentUser;
-        this.gameClient = gameClient;
-        this.isNetworkGame = (gameClient != null);
-        this.currentSessionId = gameSession.getSessionId();
 
         if (this.gameSession != null) {
             this.gameSession.addListener(this);
         }
-        if (this.gameClient != null) {
-            this.gameClient.setMessageListener(this);
-            this.gameSession.setNetworkGame(true);
-        }
 
         initialize();
-        updateGameState();
-
-        if (isNetworkGame) {
-            sendGameJoinMessage();
-        }
     }
 
     private void initialize() {
@@ -75,99 +58,150 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
 
         frame.add(mainPanel);
         frame.setVisible(true);
+
+        updateGameState();
+
+        // Center the window with slight offset for each player
+        positionWindow();
+    }
+
+    private void positionWindow() {
+        int playerIndex = gameSession.getPlayers().indexOf(currentUser);
+        int totalPlayers = gameSession.getPlayers().size();
+
+        if (totalPlayers > 1 && playerIndex >= 0) {
+            Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+            int screenWidth = screenSize.width;
+            int screenHeight = screenSize.height;
+
+            // Arrange windows in a grid
+            int cols = Math.min(totalPlayers, 2);
+            int rows = (int) Math.ceil(totalPlayers / 2.0);
+            int windowWidth = frame.getWidth();
+            int windowHeight = frame.getHeight();
+
+            int col = playerIndex % cols;
+            int row = playerIndex / cols;
+
+            int x = col * (windowWidth + 10) + 50;
+            int y = row * (windowHeight + 10) + 50;
+
+            // Ensure windows don't go off screen
+            if (x + windowWidth > screenWidth) {
+                x = screenWidth - windowWidth - 50;
+            }
+            if (y + windowHeight > screenHeight) {
+                y = screenHeight - windowHeight - 50;
+            }
+
+            frame.setLocation(x, y);
+        }
     }
 
     private void createFrame() {
         String title = "Card Game - " + (currentUser != null ? currentUser.getPlayer().getName() : "Player");
-        if (isNetworkGame) {
-            title += " (Network)";
-        }
         frame = new JFrame(title);
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         frame.setSize(1200, 800);
         frame.setLocationRelativeTo(null);
         frame.setMinimumSize(new Dimension(1000, 700));
     }
 
     private void createMainPanel() {
-        mainPanel = new JPanel(new BorderLayout());
+        mainPanel = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                try {
+                    ImageIcon backgroundIcon = new ImageIcon("Pictures/background.jpg");
+                    if (backgroundIcon.getIconWidth() != -1) {
+                        Image backgroundImage = backgroundIcon.getImage();
+                        g.drawImage(backgroundImage, 0, 0, getWidth(), getHeight(), this);
+                    } else {
+                        g.setColor(new Color(0, 100, 0));
+                        g.fillRect(0, 0, getWidth(), getHeight());
+                    }
+                } catch (Exception e) {
+                    g.setColor(new Color(0, 100, 0));
+                    g.fillRect(0, 0, getWidth(), getHeight());
+                }
+            }
+        };
         mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-
-        // Set background
-        mainPanel.setBackground(new Color(0, 100, 0)); // Green felt background
     }
 
     private void createGameInfoPanel() {
         gameInfoPanel = new JPanel(new BorderLayout());
-        gameInfoPanel.setBackground(new Color(70, 130, 180));
+        gameInfoPanel.setOpaque(false);
         gameInfoPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        JPanel topInfoPanel = new JPanel(new GridLayout(2, 2, 10, 5));
+        JPanel topInfoPanel = new JPanel(new GridLayout(2, 3, 10, 5));
         topInfoPanel.setOpaque(false);
 
-        gameInfoLabel = createInfoLabel("Waiting for game selection", Color.YELLOW, 16);
+        gameInfoLabel = createInfoLabel("Game: Setting up...", Color.YELLOW, 16);
         currentPlayerLabel = createInfoLabel("Current: -", Color.WHITE, 14);
         roundInfoLabel = createInfoLabel("Round: -/-", Color.WHITE, 14);
         leadingSuitLabel = createInfoLabel("Leading Suit: None", Color.CYAN, 14);
+        turnIndicatorLabel = createInfoLabel("", Color.ORANGE, 16);
+
+        // Turn indicator (will be updated dynamically)
+        JPanel turnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        turnPanel.setOpaque(false);
+        turnPanel.add(turnIndicatorLabel);
 
         topInfoPanel.add(gameInfoLabel);
         topInfoPanel.add(currentPlayerLabel);
+        topInfoPanel.add(turnIndicatorLabel);
         topInfoPanel.add(roundInfoLabel);
         topInfoPanel.add(leadingSuitLabel);
 
-        statusLabel = createInfoLabel("Welcome to the game!", Color.GREEN, 12);
+        statusLabel = createInfoLabel("Game starting...", Color.GREEN, 14);
         statusLabel.setHorizontalAlignment(JLabel.CENTER);
 
         gameInfoPanel.add(topInfoPanel, BorderLayout.NORTH);
         gameInfoPanel.add(statusLabel, BorderLayout.CENTER);
 
-        // Button panel
+        // OK Button panel (for when it's not user's turn)
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 5));
         buttonPanel.setOpaque(false);
 
-        chooseGameButton = createStyledButton("Choose Game", new Color(70, 130, 180));
-        chooseGameButton.addActionListener(e -> openGameMenu());
+        okButton = createStyledButton("OK", new Color(70, 130, 180));
+        okButton.setPreferredSize(new Dimension(100, 35));
+        okButton.setVisible(false);
+        okButton.addActionListener(e -> {
+            // Just an acknowledgment button - no action needed
+            if (gameSession.getCurrentPlayer() != null) {
+                statusLabel.setText("Waiting for " + gameSession.getCurrentPlayer().getPlayer().getName() + "...");
+            }
+        });
 
-        readyButton = createStyledButton("I'm Ready", new Color(218, 165, 32));
-        readyButton.addActionListener(e -> setPlayerReady());
-        readyButton.setVisible(isNetworkGame);
-
-        startGameButton = createStyledButton("Start Game", new Color(0, 150, 0));
-        startGameButton.addActionListener(e -> startGame());
-        startGameButton.setVisible(!isNetworkGame ||
-                (currentUser != null && gameSession != null && gameSession.getPlayers() != null &&
-                        !gameSession.getPlayers().isEmpty() &&
-                        currentUser.getPlayer().getName().equals(gameSession.getPlayers().get(0).getPlayer().getName())));
-
-        buttonPanel.add(chooseGameButton);
-        buttonPanel.add(readyButton);
-        buttonPanel.add(startGameButton);
-
+        buttonPanel.add(okButton);
         gameInfoPanel.add(buttonPanel, BorderLayout.SOUTH);
+
         mainPanel.add(gameInfoPanel, BorderLayout.NORTH);
     }
 
     private void createPlayedCardsPanel() {
-        playedCardsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
-        playedCardsPanel.setBackground(new Color(0, 120, 0));
+        playedCardsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 15));
+        playedCardsPanel.setOpaque(false);
         playedCardsPanel.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(Color.WHITE, 2), "Current Round - Played Cards"));
-        playedCardsPanel.setPreferredSize(new Dimension(0, 180));
+                BorderFactory.createLineBorder(Color.WHITE, 2), "Cards Played This Round"));
+        playedCardsPanel.setPreferredSize(new Dimension(0, 220));
 
         JScrollPane scrollPane = new JScrollPane(playedCardsPanel);
         scrollPane.setOpaque(false);
         scrollPane.getViewport().setOpaque(false);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.setPreferredSize(new Dimension(0, 200));
+        scrollPane.setPreferredSize(new Dimension(0, 250));
 
         mainPanel.add(scrollPane, BorderLayout.CENTER);
     }
 
     private void createPlayerHandPanel() {
         playerHandPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 15));
-        playerHandPanel.setBackground(new Color(0, 120, 0));
+        playerHandPanel.setOpaque(false);
         playerHandPanel.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(Color.YELLOW, 2), "Your Hand - Click to Play"));
+                BorderFactory.createLineBorder(Color.YELLOW, 2), "Your Hand"));
 
         JScrollPane scrollPane = new JScrollPane(playerHandPanel);
         scrollPane.setOpaque(false);
@@ -181,17 +215,17 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
 
     private void createScorePanel() {
         scorePanel = new JPanel(new GridLayout(0, 1, 5, 5));
-        scorePanel.setBackground(new Color(0, 120, 0));
+        scorePanel.setOpaque(false);
         scorePanel.setBorder(BorderFactory.createTitledBorder(
                 BorderFactory.createLineBorder(Color.WHITE, 1), "Scores"));
-        scorePanel.setPreferredSize(new Dimension(180, 0));
+        scorePanel.setPreferredSize(new Dimension(200, 0));
 
         updateScorePanel();
 
         JScrollPane scrollPane = new JScrollPane(scorePanel);
         scrollPane.setOpaque(false);
         scrollPane.getViewport().setOpaque(false);
-        scrollPane.setPreferredSize(new Dimension(160, 0));
+        scrollPane.setPreferredSize(new Dimension(180, 0));
 
         mainPanel.add(scrollPane, BorderLayout.EAST);
     }
@@ -201,6 +235,7 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
         label.setFont(new Font("Arial", Font.BOLD, fontSize));
         label.setForeground(color);
         label.setOpaque(false);
+        label.setHorizontalAlignment(JLabel.CENTER);
         return label;
     }
 
@@ -246,10 +281,10 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
         cardLabel.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if (cardsEnabled && isValidMove(card)) {
+                if (cardsEnabled && gameSession.isValidMove(currentUser, card)) {
                     playCard(cardLabel, card);
                 } else if (!cardsEnabled) {
-                    showMessage("Please wait for your turn or select a game first");
+                    showMessage("Please wait for your turn");
                 } else {
                     showMessage("Invalid move! " + getInvalidMoveReason(card));
                 }
@@ -257,7 +292,7 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
 
             @Override
             public void mouseEntered(MouseEvent e) {
-                if (cardsEnabled && isValidMove(card)) {
+                if (cardsEnabled && gameSession.isValidMove(currentUser, card)) {
                     cardLabel.setBorder(BorderFactory.createLineBorder(Color.GREEN, 3));
                     cardLabel.setCursor(new Cursor(Cursor.HAND_CURSOR));
                 } else {
@@ -275,65 +310,16 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
         return cardLabel;
     }
 
-    private boolean isValidMove(Card card) {
-        if (gameSession == null || currentUser == null) return false;
-
-        // Check if it's player's turn
-        InGamePlayer currentPlayer = gameSession.getCurrentPlayer();
-        if (currentPlayer == null || !currentPlayer.equals(currentUser)) {
-            return false;
-        }
-
-        // Check leading suit rules
-        char leadingSuit = gameSession.getLeadingSuit();
-        if (leadingSuit != 0) {
-            // Player must follow leading suit if they have it
-            boolean hasLeadingSuit = false;
-            for (Card handCard : currentUser.getHand().hand) {
-                if (handCard.getCardSuit() == leadingSuit) {
-                    hasLeadingSuit = true;
-                    break;
-                }
-            }
-            if (hasLeadingSuit && card.getCardSuit() != leadingSuit) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     private String getInvalidMoveReason(Card card) {
-        if (gameSession.getCurrentPlayer() == null || !gameSession.getCurrentPlayer().equals(currentUser)) {
-            String currentPlayerName = gameSession.getCurrentPlayer() != null ?
-                    gameSession.getCurrentPlayer().getPlayer().getName() : "Unknown";
-            return "Not your turn! Current player: " + currentPlayerName;
+        if (gameSession.getCurrentPlayer() != currentUser) {
+            return "Not your turn!";
         }
-
-        char leadingSuit = gameSession.getLeadingSuit();
-        if (leadingSuit != 0) {
-            boolean hasLeadingSuit = false;
-            for (Card handCard : currentUser.getHand().hand) {
-                if (handCard.getCardSuit() == leadingSuit) {
-                    hasLeadingSuit = true;
-                    break;
-                }
-            }
-            if (hasLeadingSuit && card.getCardSuit() != leadingSuit) {
-                return "You must follow the leading suit: " + getSuitName(leadingSuit);
-            }
+        if (gameSession.getLeadingSuit() != 0 &&
+                gameSession.playerHasSuit(currentUser, gameSession.getLeadingSuit()) &&
+                card.getCardSuit() != gameSession.getLeadingSuit()) {
+            return "You must follow the leading suit: " + gameSession.getLeadingSuitName();
         }
         return "Invalid card selection";
-    }
-
-    private String getSuitName(char suit) {
-        switch(suit) {
-            case 'H': return "Hearts";
-            case 'S': return "Spades";
-            case 'D': return "Diamonds";
-            case 'C': return "Clubs";
-            default: return "Unknown";
-        }
     }
 
     private JLabel createPlaceholderCard(Card card) {
@@ -372,29 +358,14 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
     }
 
     private void playCard(JLabel cardLabel, Card card) {
-        if (isNetworkGame) {
-            // Send card play to server
-            if (gameClient != null) {
-                gameClient.playCard(currentSessionId, card);
-            }
+        boolean played = gameSession.playCard(currentUser, card);
+        if (played) {
+            // Disable this card
             cardLabel.setEnabled(false);
             for (MouseListener listener : cardLabel.getMouseListeners()) {
                 cardLabel.removeMouseListener(listener);
             }
-        } else {
-            // Local play - simplified version
-            try {
-                // Remove card from hand
-                currentUser.getHand().removeCard(card);
-
-                // Add to current round (simplified)
-                // In a real implementation, you'd call gameSession.playCard()
-
-                showMessage("Played: " + card.description());
-                updateGameState();
-            } catch (Exception e) {
-                showMessage("Error playing card: " + e.getMessage());
-            }
+            cardLabel.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
         }
 
         updatePlayedCards();
@@ -404,12 +375,26 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
     private void updatePlayedCards() {
         playedCardsPanel.removeAll();
 
-        // Simplified - in real implementation, get from gameSession
-        if (gameSession != null && gameSession.getCurrentRound() != null) {
-            for (Card card : gameSession.getCurrentRound()) {
-                JLabel cardLabel = createPlayedCardLabel(card);
-                playedCardsPanel.add(cardLabel);
+        Map<InGamePlayer, Card> roundCards = gameSession.getCurrentRoundCardsByPlayer();
+        for (Map.Entry<InGamePlayer, Card> entry : roundCards.entrySet()) {
+            JPanel playerCardPanel = new JPanel(new BorderLayout());
+            playerCardPanel.setOpaque(false);
+
+            String playerName = entry.getKey().getPlayer().getName();
+            JLabel playerLabel = new JLabel(playerName, JLabel.CENTER);
+            playerLabel.setFont(new Font("Arial", Font.BOLD, 12));
+            playerLabel.setForeground(Color.WHITE);
+
+            JLabel cardLabel = createPlayedCardLabel(entry.getValue());
+
+            if (entry.getKey() == currentUser) {
+                playerLabel.setForeground(Color.YELLOW);
+                cardLabel.setBorder(BorderFactory.createLineBorder(Color.YELLOW, 3));
             }
+
+            playerCardPanel.add(playerLabel, BorderLayout.NORTH);
+            playerCardPanel.add(cardLabel, BorderLayout.CENTER);
+            playedCardsPanel.add(playerCardPanel);
         }
 
         playedCardsPanel.revalidate();
@@ -436,112 +421,6 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
         return cardLabel;
     }
 
-    private void openGameMenu() {
-        if (gameSession == null) {
-            showMessage("No game session available");
-            return;
-        }
-
-        if (!gameSession.isGameStarted()) {
-            showMessage("Please start the game first");
-            return;
-        }
-
-        JDialog dialog = new JDialog(frame, "Choose Game Type", true);
-        dialog.setSize(400, 500);
-        dialog.setLocationRelativeTo(frame);
-        dialog.setLayout(new BorderLayout());
-
-        JPanel dialogPanel = new JPanel(new BorderLayout());
-        dialogPanel.setBackground(new Color(40, 40, 60));
-        dialogPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-
-        JLabel titleLabel = new JLabel("Select Game Type", JLabel.CENTER);
-        titleLabel.setFont(new Font("Arial", Font.BOLD, 20));
-        titleLabel.setForeground(Color.WHITE);
-        titleLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 20, 0));
-        dialogPanel.add(titleLabel, BorderLayout.NORTH);
-
-        JPanel gamesPanel = new JPanel(new GridLayout(0, 1, 10, 10));
-        gamesPanel.setBackground(new Color(40, 40, 60));
-
-        for (GameType game : GameType.values()) {
-            JButton gameBtn = createStyledButton(game.getDisplayName(), new Color(100, 150, 200));
-            gameBtn.setToolTipText(game.getCode());
-            gameBtn.addActionListener(e -> {
-                try {
-                    if (isNetworkGame && gameClient != null) {
-                        gameClient.selectGameType(currentSessionId, game);
-                    } else {
-                        gameSession.setSelectedGame(game);
-                        onGameSelected(game);
-                    }
-                    chooseGameButton.setText("Game: " + game.getDisplayName());
-                    chooseGameButton.setBackground(new Color(100, 200, 100));
-                    dialog.dispose();
-                    showMessage("Game selected: " + game.getDisplayName());
-                } catch (Exception ex) {
-                    showMessage("Error: " + ex.getMessage());
-                }
-            });
-            gamesPanel.add(gameBtn);
-        }
-
-        JScrollPane scrollPane = new JScrollPane(gamesPanel);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.getViewport().setBackground(new Color(40, 40, 60));
-        dialogPanel.add(scrollPane, BorderLayout.CENTER);
-
-        JButton closeButton = createStyledButton("Close", new Color(150, 150, 150));
-        closeButton.addActionListener(e -> dialog.dispose());
-        JPanel closePanel = new JPanel();
-        closePanel.setBackground(new Color(40, 40, 60));
-        closePanel.add(closeButton);
-        dialogPanel.add(closePanel, BorderLayout.SOUTH);
-
-        dialog.add(dialogPanel);
-        dialog.setVisible(true);
-    }
-
-    private void setPlayerReady() {
-        if (isNetworkGame && gameClient != null) {
-            gameClient.sendMessage(new GameMessage(
-                    GameMessage.PLAYER_READY,
-                    currentUser.getPlayer().getName(),
-                    currentSessionId
-            ));
-            readyButton.setEnabled(false);
-            readyButton.setText("Ready!");
-            readyButton.setBackground(new Color(100, 200, 100));
-            showMessage("You are ready!");
-        }
-    }
-
-    private void startGame() {
-        if (isNetworkGame && gameClient != null) {
-            gameClient.startGame(currentSessionId);
-        } else {
-            if (gameSession != null && !gameSession.isGameStarted()) {
-                boolean started = gameSession.startGame();
-                if (started) {
-                    showMessage("Game started successfully!");
-                } else {
-                    showMessage("Failed to start game");
-                }
-            }
-        }
-    }
-
-    private void sendGameJoinMessage() {
-        if (isNetworkGame && gameClient != null) {
-            gameClient.sendMessage(new GameMessage(
-                    GameMessage.PLAYER_JOIN,
-                    currentUser.getPlayer().getName(),
-                    currentSessionId
-            ));
-        }
-    }
-
     private void updateGameState() {
         if (gameSession == null) {
             statusLabel.setText("No game session available");
@@ -549,45 +428,62 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
             return;
         }
 
-        String gameTypeText = gameSession.getSelectedGame() != null ?
-                gameSession.getSelectedGame().getDisplayName() : "Not selected";
-        gameInfoLabel.setText("Game: " + gameTypeText);
+        // Update game info labels
+        gameInfoLabel.setText("Game: " +
+                (gameSession.getSelectedGame() != null ?
+                        gameSession.getSelectedGame().getDisplayName() : "Not selected"));
 
-        String currentPlayerName = gameSession.getCurrentPlayer() != null ?
-                gameSession.getCurrentPlayer().getPlayer().getName() : "Unknown";
-        currentPlayerLabel.setText("Current: " + currentPlayerName);
+        InGamePlayer currentPlayer = gameSession.getCurrentPlayer();
+        currentPlayerLabel.setText("Current: " +
+                (currentPlayer != null ? currentPlayer.getPlayer().getName() : "-"));
 
         roundInfoLabel.setText("Round: " + (gameSession.getRoundsPlayed() + 1) + "/" + gameSession.getTotalRounds());
+        leadingSuitLabel.setText("Leading Suit: " + gameSession.getLeadingSuitName());
 
-        String leadingSuitText = "Leading Suit: " + getSuitName(gameSession.getLeadingSuit());
-        leadingSuitLabel.setText(leadingSuitText);
+        // Check if it's this user's turn
+        isUsersTurn = (currentPlayer == currentUser);
 
-        cardsEnabled = gameSession.isRoundInProgress() &&
-                gameSession.getCurrentPlayer() != null &&
-                gameSession.getCurrentPlayer().equals(currentUser) &&
+        // Fix: Simplified condition for enabling cards
+        cardsEnabled = gameSession.isGameStarted() &&
+                !gameSession.isGameOver() &&
+                isUsersTurn &&
                 gameSession.getSelectedGame() != null;
 
+        // Update turn indicator
+        if (isUsersTurn) {
+            turnIndicatorLabel.setText("YOUR TURN!");
+            turnIndicatorLabel.setForeground(Color.GREEN);
+        } else {
+            turnIndicatorLabel.setText("Waiting...");
+            turnIndicatorLabel.setForeground(Color.ORANGE);
+        }
+
+        // Update status and OK button
         if (!gameSession.isGameStarted()) {
             statusLabel.setText("Game not started");
             statusLabel.setForeground(Color.RED);
-            startGameButton.setVisible(true);
+            okButton.setVisible(false);
         } else if (gameSession.getSelectedGame() == null) {
             statusLabel.setText("Waiting for game selection");
             statusLabel.setForeground(Color.YELLOW);
-            startGameButton.setVisible(false);
+            okButton.setVisible(false);
         } else if (gameSession.isGameOver()) {
-            statusLabel.setText("Game Over! Winner: " +
-                    (gameSession.getGameWinner() != null ? gameSession.getGameWinner().getPlayer().getName() : ""));
+            String winnerName = gameSession.getWinnerDisplayName();
+            statusLabel.setText("Game Over! Winner: " + winnerName);
             statusLabel.setForeground(Color.GREEN);
-            startGameButton.setVisible(false);
-        } else if (cardsEnabled) {
+            okButton.setVisible(false);
+            cardsEnabled = false;
+        } else if (isUsersTurn) {
+            // FIX: Changed from cardsEnabled to isUsersTurn
             statusLabel.setText("Your turn! Play a card");
             statusLabel.setForeground(Color.GREEN);
-            startGameButton.setVisible(false);
+            okButton.setVisible(false);
         } else {
-            statusLabel.setText("Waiting for other players...");
+            // FIX: Show correct waiting message
+            statusLabel.setText("Waiting for " +
+                    (currentPlayer != null ? currentPlayer.getPlayer().getName() : "other players") + "...");
             statusLabel.setForeground(Color.ORANGE);
-            startGameButton.setVisible(false);
+            okButton.setVisible(true);
         }
 
         updateScorePanel();
@@ -614,9 +510,9 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
             JLabel nameLabel = new JLabel(playerName);
             nameLabel.setFont(new Font("Arial", Font.BOLD, 12));
 
-            if (player.equals(currentUser)) {
+            if (player == currentUser) {
                 nameLabel.setForeground(Color.YELLOW);
-                nameLabel.setText("▶ " + playerName);
+                nameLabel.setText("▶ " + playerName + " (You)");
             } else {
                 nameLabel.setForeground(Color.WHITE);
             }
@@ -626,7 +522,8 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
             scoreLabel.setFont(new Font("Arial", Font.BOLD, 14));
             scoreLabel.setForeground(Color.CYAN);
 
-            if (player.equals(gameSession.getCurrentPlayer())) {
+            // Highlight current player
+            if (player == gameSession.getCurrentPlayer()) {
                 playerScorePanel.setBackground(new Color(255, 255, 255, 50));
                 playerScorePanel.setOpaque(true);
             }
@@ -653,7 +550,7 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
         button.setFocusPainted(false);
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(30, 80, 120), 2),
-                BorderFactory.createEmptyBorder(8, 12, 8, 12)
+                BorderFactory.createEmptyBorder(8, 15, 8, 15)
         ));
         button.setCursor(new Cursor(Cursor.HAND_CURSOR));
         button.setOpaque(true);
@@ -701,7 +598,7 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
     @Override
     public void onGameStarted() {
         SwingUtilities.invokeLater(() -> {
-            showMessage("Game started! Please select a game type.");
+            showMessage("Game started!");
             updateGameState();
         });
     }
@@ -717,11 +614,9 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
     @Override
     public void onRoundCompleted(InGamePlayer winner) {
         SwingUtilities.invokeLater(() -> {
-            String message = "Round won by: " + (winner != null ? winner.getPlayer().getName() : "Unknown");
+            String message = "Round won by: " + winner.getPlayer().getName();
             showMessage(message);
-            if (!isNetworkGame) {
-                JOptionPane.showMessageDialog(frame, message, "Round Complete", JOptionPane.INFORMATION_MESSAGE);
-            }
+            JOptionPane.showMessageDialog(frame, message, "Round Complete", JOptionPane.INFORMATION_MESSAGE);
             updateGameState();
         });
     }
@@ -729,20 +624,16 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
     @Override
     public void onGameOver(Map<InGamePlayer, Integer> scores) {
         SwingUtilities.invokeLater(() -> {
-            StringBuilder result = new StringBuilder("<html><b>Game Over! Final Scores:</b><br>");
-            for (Map.Entry<InGamePlayer, Integer> entry : scores.entrySet()) {
-                result.append(entry.getKey().getPlayer().getName()).append(": ").append(entry.getValue()).append("<br>");
-            }
+            // Use the GameSession's method to get formatted final scores
+            String result = gameSession.getFinalScoresForDisplay();
 
-            InGamePlayer winner = gameSession.getGameWinner();
-            if (winner != null) {
-                result.append("<br><b>Winner: ").append(winner.getPlayer().getName()).append("</b>");
-            }
-
-            result.append("</html>");
-
-            JOptionPane.showMessageDialog(frame, result.toString(), "Game Over", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(frame, result, "Game Over", JOptionPane.INFORMATION_MESSAGE);
             updateGameState();
+
+            // Stop the timer when game is over
+            if (gameTimer != null) {
+                gameTimer.stop();
+            }
         });
     }
 
@@ -757,116 +648,15 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
     public void onGameSelected(GameType gameType) {
         SwingUtilities.invokeLater(() -> {
             gameInfoLabel.setText("Game: " + gameType.getDisplayName());
-            chooseGameButton.setText("Game: " + gameType.getDisplayName());
-            chooseGameButton.setBackground(new Color(100, 200, 100));
             statusLabel.setText("Game selected: " + gameType.getDisplayName() + " - Ready to play!");
             statusLabel.setForeground(Color.GREEN);
-
-            cardsEnabled = gameSession != null && gameSession.getCurrentPlayer() != null &&
-                    gameSession.getCurrentPlayer().equals(currentUser);
             updateGameState();
         });
     }
 
     @Override
     public void onPlayerReady(String playerName) {
-        SwingUtilities.invokeLater(() -> {
-            showMessage("Player " + playerName + " is ready!");
-        });
-    }
-
-    // GameClient.MessageListener implementations
-    @Override
-    public void onMessageReceived(GameMessage message) {
-        SwingUtilities.invokeLater(() -> {
-            handleNetworkMessage(message);
-        });
-    }
-
-    @Override
-    public void onConnectionStatusChanged(boolean connected) {
-        SwingUtilities.invokeLater(() -> {
-            if (!connected) {
-                statusLabel.setText("Disconnected from server - playing locally");
-                statusLabel.setForeground(Color.RED);
-            } else {
-                statusLabel.setText("Connected to server");
-                statusLabel.setForeground(Color.GREEN);
-            }
-        });
-    }
-
-    private void handleNetworkMessage(GameMessage message) {
-        System.out.println("📨 Network message: " + message.getType());
-
-        try {
-            switch (message.getType()) {
-                case GameMessage.GAME_STARTED:
-                    if (gameSession != null && !gameSession.isGameStarted()) {
-                        gameSession.startGame();
-                    }
-                    break;
-
-                case GameMessage.GAME_TYPE_SELECTED:
-                    if (message.getData() instanceof GameMessage.GameTypeData) {
-                        GameMessage.GameTypeData data = (GameMessage.GameTypeData) message.getData();
-                        gameSession.setSelectedGame(data.gameType);
-                        onGameSelected(data.gameType);
-                    }
-                    break;
-
-                case GameMessage.CARD_PLAYED:
-                    if (message.getData() instanceof GameMessage.CardPlayData) {
-                        GameMessage.CardPlayData data = (GameMessage.CardPlayData) message.getData();
-                        if (!data.playerName.equals(currentUser.getPlayer().getName())) {
-                            // Update UI for other player's card play
-                            showMessage(data.playerName + " played a card");
-                            updateGameState();
-                        }
-                    }
-                    break;
-
-                case GameMessage.ROUND_COMPLETED:
-                    if (message.getData() instanceof GameMessage.RoundCompleteData) {
-                        GameMessage.RoundCompleteData data = (GameMessage.RoundCompleteData) message.getData();
-                        showMessage("Round won by: " + data.winnerName);
-                    }
-                    break;
-
-                case GameMessage.GAME_OVER:
-                    if (message.getData() instanceof GameMessage.GameOverData) {
-                        GameMessage.GameOverData data = (GameMessage.GameOverData) message.getData();
-                        StringBuilder result = new StringBuilder("<html><b>Game Over! Final Scores:</b><br>");
-                        for (Map.Entry<String, Integer> entry : data.finalScores.entrySet()) {
-                            result.append(entry.getKey()).append(": ").append(entry.getValue()).append("<br>");
-                        }
-                        result.append("<br><b>Winner: ").append(data.winnerName).append("</b></html>");
-                        JOptionPane.showMessageDialog(frame, result.toString(), "Game Over", JOptionPane.INFORMATION_MESSAGE);
-                    }
-                    break;
-
-                case GameMessage.PLAYER_READY:
-                    String readyPlayer = (String) message.getData();
-                    onPlayerReady(readyPlayer);
-                    break;
-
-                case GameMessage.PLAYER_JOINED:
-                    if (message.getData() instanceof GameMessage.PlayerJoinData) {
-                        GameMessage.PlayerJoinData data = (GameMessage.PlayerJoinData) message.getData();
-                        showMessage("Player " + data.playerName + " joined the game");
-                    }
-                    break;
-
-                case GameMessage.ERROR:
-                    String error = message.getData() != null ? message.getData().toString() : "Unknown error";
-                    showMessage("Server error: " + error);
-                    break;
-            }
-
-            updateGameState();
-        } catch (Exception e) {
-            System.err.println("Error handling network message: " + e.getMessage());
-        }
+        // Not used in local multiplayer
     }
 
     public void display() {
@@ -883,5 +673,19 @@ public class GameScreen implements GameSessionListener, GameClient.MessageListen
         if (frame != null) {
             frame.dispose();
         }
+    }
+
+    public static void main(String[] args) {
+        // Test method - can be used for testing the GameScreen
+        SwingUtilities.invokeLater(() -> {
+            java.util.ArrayList<user.Player> players = new java.util.ArrayList<>();
+            players.add(new user.Player("Player1", "p1@test.com", "pass"));
+            players.add(new user.Player("Player2", "p2@test.com", "pass"));
+
+            GameSession gameSession = new GameSession(players);
+            gameSession.startGame();
+
+            new GameScreen(gameSession, gameSession.getPlayers().get(0));
+        });
     }
 }

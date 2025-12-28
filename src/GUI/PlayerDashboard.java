@@ -8,35 +8,29 @@ import java.util.ArrayList;
 import data_base_connection.GameRepository;
 import data_base_connection.GameSessionInfo;
 import user.User;
-import gameEngine.GameSession;
-import user.InGamePlayer;
-import user.Player;
-import network.GameClient;
-import network.GameMessage;
 
-public class PlayerDashboard implements GameClient.MessageListener {
+/**
+ * PlayerDashboard - Simplified for viewing past games only
+ * Since players now join via sequential login, this is optional
+ */
+public class PlayerDashboard {
     private JFrame frame;
     private JPanel mainPanel;
     private JList<GameSessionInfo> sessionsList;
     private DefaultListModel<GameSessionInfo> listModel;
-    private JButton joinButton;
+    private JButton viewButton;
     private JButton refreshButton;
     private JButton backButton;
     private JLabel statusLabel;
     private JLabel welcomeLabel;
 
     private GameRepository gameRepository;
-    private GameClient gameClient;
     private User currentUser;
-    private boolean connectedToServer = false;
-    private int currentSessionId = -1;
 
     public PlayerDashboard(User user) {
         this.currentUser = user;
         this.gameRepository = new GameRepository();
-        this.gameClient = new GameClient(user.getName(), this);
         initialize();
-        connectToServer();
     }
 
     public void display() {
@@ -55,156 +49,11 @@ public class PlayerDashboard implements GameClient.MessageListener {
         frame.setLocationRelativeTo(null);
     }
 
-    private void connectToServer() {
-        boolean success = gameClient.connect("localhost", 8080);
-        connectedToServer = success;
-
-        if (success) {
-            // Request current sessions from server
-            gameClient.requestSessions();
-            statusLabel.setText("Connected to game server - Loading sessions...");
-            System.out.println("✅ Connected to game server as: " + currentUser.getName());
-        } else {
-            statusLabel.setText("Using local sessions only");
-            System.out.println("⚠️  Could not connect to server, using local sessions");
-            refreshSessionsList(); // Fallback to local
-        }
-    }
-
-    // Implement MessageListener
-    @Override
-    public void onMessageReceived(GameMessage message) {
-        SwingUtilities.invokeLater(() -> {
-            handleServerMessage(message);
-        });
-    }
-
-    @Override
-    public void onConnectionStatusChanged(boolean connected) {
-        connectedToServer = connected;
-        String status = connected ? "Connected to server" : "Disconnected from server";
-        statusLabel.setText(status);
-
-        if (connected) {
-            // Request sessions when reconnected
-            gameClient.requestSessions();
-            System.out.println("✅ Reconnected to game server");
-        } else {
-            System.out.println("❌ Disconnected from game server");
-            // Fallback to local sessions
-            refreshSessionsList();
-        }
-    }
-
-    private void handleServerMessage(GameMessage message) {
-        System.out.println("📨 Received: " + message.getType());
-
-        switch (message.getType()) {
-            case GameMessage.SESSION_LIST:
-                updateSessionsFromServer(message.getData());
-                break;
-            case GameMessage.SESSION_CREATED:
-                refreshSessionsList(); // Refresh to show new session
-                break;
-            case GameMessage.JOIN_SUCCESS:
-                handleJoinSuccess(message);
-                break;
-            case GameMessage.JOIN_FAILED:
-                handleJoinFailed(message);
-                break;
-            case GameMessage.PLAYER_JOINED:
-                handlePlayerJoined(message);
-                break;
-            case GameMessage.WELCOME:
-                statusLabel.setText("Connected to game server - Loading sessions...");
-                gameClient.requestSessions();
-                break;
-            case GameMessage.ERROR:
-                handleError(message);
-                break;
-        }
-    }
-
-    private void updateSessionsFromServer(Object data) {
-        if (data instanceof List) {
-            List<GameMessage.SessionData> sessions = (List<GameMessage.SessionData>) data;
-            listModel.clear();
-
-            if (sessions.isEmpty()) {
-                listModel.addElement(new GameSessionInfo(0, "No network sessions available", 0, 0, "none", null));
-                joinButton.setEnabled(false);
-            } else {
-                for (GameMessage.SessionData session : sessions) {
-                    // Convert to GameSessionInfo for display
-                    GameSessionInfo sessionInfo = new GameSessionInfo(
-                            session.sessionId,
-                            session.hostName,
-                            session.maxPlayers,
-                            session.currentPlayers,
-                            session.status,
-                            new java.sql.Timestamp(System.currentTimeMillis()),
-                            session.gameType
-                    );
-                    listModel.addElement(sessionInfo);
-                }
-                joinButton.setEnabled(true);
-            }
-
-            statusLabel.setText("Found " + sessions.size() + " network game sessions");
-            System.out.println("📋 Loaded " + sessions.size() + " sessions from server");
-        }
-    }
-
-    private void handleJoinSuccess(GameMessage message) {
-        if (message.getData() instanceof Integer) {
-            int sessionId = (Integer) message.getData();
-            currentSessionId = sessionId;
-
-            System.out.println("✅ Successfully joined session: " + sessionId);
-
-            // Load the game session and open game screen
-            GameSession gameSession = loadGameSession(sessionId);
-            if (gameSession != null) {
-                InGamePlayer currentPlayer = findOrCreatePlayerInSession(gameSession, currentUser);
-                openGameScreen(gameSession, currentPlayer);
-            } else {
-                JOptionPane.showMessageDialog(frame,
-                        "Failed to load game session. Please try again.",
-                        "Error",
-                        JOptionPane.ERROR_MESSAGE);
-            }
-        }
-        joinButton.setEnabled(true);
-    }
-
-    private void handleJoinFailed(GameMessage message) {
-        String error = (String) message.getData();
-        JOptionPane.showMessageDialog(frame,
-                "Failed to join session: " + error,
-                "Join Failed",
-                JOptionPane.ERROR_MESSAGE);
-        joinButton.setEnabled(true);
-    }
-
-    private void handlePlayerJoined(GameMessage message) {
-        if (message.getData() instanceof GameMessage.PlayerJoinData) {
-            GameMessage.PlayerJoinData data = (GameMessage.PlayerJoinData) message.getData();
-            System.out.println("👤 Player " + data.playerName + " joined session " + data.sessionId);
-            // Could update UI to show current players count
-        }
-    }
-
-    private void handleError(GameMessage message) {
-        String error = (String) message.getData();
-        statusLabel.setText("Server error: " + error);
-        System.err.println("❌ Server error: " + error);
-    }
-
     private void createFrame() {
         frame = new JFrame("Player Dashboard - " + currentUser.getName());
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(800, 600);
-        frame.setMinimumSize(new Dimension(700, 500));
+        frame.setSize(700, 500);
+        frame.setMinimumSize(new Dimension(600, 400));
     }
 
     private void createMainPanel() {
@@ -222,16 +71,9 @@ public class PlayerDashboard implements GameClient.MessageListener {
         welcomeLabel.setFont(new Font("Arial", Font.BOLD, 20));
         welcomeLabel.setForeground(Color.WHITE);
 
-        JLabel subtitleLabel = new JLabel("Available Game Sessions", JLabel.LEFT);
+        JLabel subtitleLabel = new JLabel("Your Past Game Sessions", JLabel.LEFT);
         subtitleLabel.setFont(new Font("Arial", Font.PLAIN, 14));
         subtitleLabel.setForeground(Color.WHITE);
-
-        JLabel connectionLabel = new JLabel(
-                connectedToServer ? "🔗 Connected to Server" : "⚠️  Local Mode Only",
-                JLabel.RIGHT
-        );
-        connectionLabel.setFont(new Font("Arial", Font.BOLD, 12));
-        connectionLabel.setForeground(Color.WHITE);
 
         JPanel textPanel = new JPanel(new GridLayout(2, 1));
         textPanel.setOpaque(false);
@@ -241,7 +83,6 @@ public class PlayerDashboard implements GameClient.MessageListener {
         JPanel headerPanel = new JPanel(new BorderLayout());
         headerPanel.setOpaque(false);
         headerPanel.add(textPanel, BorderLayout.WEST);
-        headerPanel.add(connectionLabel, BorderLayout.EAST);
 
         welcomePanel.add(headerPanel, BorderLayout.CENTER);
         mainPanel.add(welcomePanel, BorderLayout.NORTH);
@@ -254,18 +95,9 @@ public class PlayerDashboard implements GameClient.MessageListener {
         sessionsList.setFont(new Font("Arial", Font.PLAIN, 14));
         sessionsList.setCellRenderer(new SessionListRenderer());
 
-        // Add double-click listener for quick joining
-        sessionsList.addMouseListener(new MouseAdapter() {
-            public void mouseClicked(MouseEvent evt) {
-                if (evt.getClickCount() == 2) {
-                    joinSelectedSession();
-                }
-            }
-        });
-
         JScrollPane scrollPane = new JScrollPane(sessionsList);
         scrollPane.setBorder(BorderFactory.createTitledBorder(
-                "Available Game Sessions - Double-click to join quickly"));
+                "Past Game Sessions - View details only"));
         scrollPane.setPreferredSize(new Dimension(0, 300));
         mainPanel.add(scrollPane, BorderLayout.CENTER);
     }
@@ -276,7 +108,7 @@ public class PlayerDashboard implements GameClient.MessageListener {
         controlPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
 
         // Status label
-        statusLabel = new JLabel("Select a game session to join", JLabel.CENTER);
+        statusLabel = new JLabel("Select a game session to view details", JLabel.CENTER);
         statusLabel.setFont(new Font("Arial", Font.PLAIN, 12));
         controlPanel.add(statusLabel, BorderLayout.NORTH);
 
@@ -287,14 +119,14 @@ public class PlayerDashboard implements GameClient.MessageListener {
         refreshButton = createStyledButton("Refresh", new Color(70, 130, 180));
         refreshButton.addActionListener(e -> refreshSessionsList());
 
-        joinButton = createStyledButton("Join Session", new Color(0, 150, 0));
-        joinButton.addActionListener(e -> joinSelectedSession());
+        viewButton = createStyledButton("View Details", new Color(0, 150, 0));
+        viewButton.addActionListener(e -> viewSelectedSession());
 
-        backButton = createStyledButton("Logout", new Color(150, 150, 150));
+        backButton = createStyledButton("Back to Main", new Color(150, 150, 150));
         backButton.addActionListener(e -> logout());
 
         buttonPanel.add(refreshButton);
-        buttonPanel.add(joinButton);
+        buttonPanel.add(viewButton);
         buttonPanel.add(backButton);
 
         controlPanel.add(buttonPanel, BorderLayout.CENTER);
@@ -313,150 +145,75 @@ public class PlayerDashboard implements GameClient.MessageListener {
     }
 
     private void refreshSessionsList() {
-        if (connectedToServer) {
-            // Request sessions from server
-            gameClient.requestSessions();
-            statusLabel.setText("Refreshing sessions from server...");
-        } else {
-            // Load local sessions
-            loadLocalSessions();
-        }
-    }
-
-    private void loadLocalSessions() {
         listModel.clear();
         List<GameSessionInfo> sessions = gameRepository.getActiveGameSessions();
 
         if (sessions.isEmpty()) {
-            listModel.addElement(new GameSessionInfo(0, "No local game sessions available", 0, 0, "none", null));
-            joinButton.setEnabled(false);
+            listModel.addElement(new GameSessionInfo(0, "No past game sessions found", 0, 0, "none", null));
+            viewButton.setEnabled(false);
         } else {
+            // Filter to show only sessions this player was in
             for (GameSessionInfo session : sessions) {
-                // Only show sessions that are waiting for players or active
-                if ("waiting".equals(session.getGameState()) || "active".equals(session.getGameState())) {
+                List<String> players = gameRepository.getSessionPlayers(session.getSessionId());
+                if (players.contains(currentUser.getName())) {
                     listModel.addElement(session);
                 }
             }
-            joinButton.setEnabled(true);
+
+            if (listModel.isEmpty()) {
+                listModel.addElement(new GameSessionInfo(0, "No sessions found for " + currentUser.getName(), 0, 0, "none", null));
+                viewButton.setEnabled(false);
+            } else {
+                viewButton.setEnabled(true);
+            }
         }
 
-        statusLabel.setText("Found " + listModel.size() + " local game sessions");
-        System.out.println("📋 Loaded " + listModel.size() + " local sessions");
+        statusLabel.setText("Found " + listModel.size() + " game sessions for " + currentUser.getName());
     }
 
-    private void joinSelectedSession() {
+    private void viewSelectedSession() {
         GameSessionInfo selected = sessionsList.getSelectedValue();
         if (selected == null || selected.getSessionId() == 0) {
             JOptionPane.showMessageDialog(frame, "Please select a valid game session");
             return;
         }
 
-        if (connectedToServer) {
-            // Join via server
-            joinSessionViaServer(selected.getSessionId());
-        } else {
-            // Fallback to local join
-            joinLocalSession(selected.getSessionId());
-        }
-    }
+        JDialog detailsDialog = new JDialog(frame, "Session Details", true);
+        detailsDialog.setSize(400, 300);
+        detailsDialog.setLocationRelativeTo(frame);
 
-    private void joinSessionViaServer(int sessionId) {
-        try {
-            joinButton.setEnabled(false);
-            statusLabel.setText("Joining session " + sessionId + " via network...");
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
-            // Send join request to server
-            gameClient.joinSession(sessionId);
+        String details = String.format("""
+            <html>
+            <h2>Session %d</h2>
+            <b>Host:</b> %s<br>
+            <b>Players:</b> %d<br>
+            <b>Status:</b> %s<br>
+            <b>Game Type:</b> %s<br>
+            <b>Created:</b> %s<br>
+            </html>
+            """,
+                selected.getSessionId(),
+                selected.getHostName(),
+                selected.getPlayerCount(),
+                selected.getGameState(),
+                selected.getGameType() != null ? selected.getGameType() : "Not specified",
+                selected.getCreatedAt()
+        );
 
-            System.out.println("📤 Sent JOIN_SESSION request for session: " + sessionId);
+        JLabel detailsLabel = new JLabel(details);
+        panel.add(detailsLabel, BorderLayout.CENTER);
 
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(frame,
-                    "Error joining game session: " + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE);
-            joinButton.setEnabled(true);
-        }
-    }
+        JButton closeButton = new JButton("Close");
+        closeButton.addActionListener(e -> detailsDialog.dispose());
+        JPanel buttonPanel = new JPanel();
+        buttonPanel.add(closeButton);
+        panel.add(buttonPanel, BorderLayout.SOUTH);
 
-    private void joinLocalSession(int sessionId) {
-        try {
-            GameSession gameSession = loadGameSession(sessionId);
-            if (gameSession != null) {
-                InGamePlayer currentPlayer = findOrCreatePlayerInSession(gameSession, currentUser);
-                if (currentPlayer != null) {
-                    openGameScreen(gameSession, currentPlayer);
-                } else {
-                    JOptionPane.showMessageDialog(frame,
-                            "Could not join the game session. Session may be full.",
-                            "Join Error",
-                            JOptionPane.ERROR_MESSAGE);
-                }
-            } else {
-                JOptionPane.showMessageDialog(frame,
-                        "Session not found or no longer available.",
-                        "Join Error",
-                        JOptionPane.ERROR_MESSAGE);
-            }
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(frame,
-                    "Error joining game session: " + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    private GameSession loadGameSession(int sessionId) {
-        // Try to load from database first
-        GameSession gameSession = gameRepository.loadGameSession(sessionId);
-
-        if (gameSession == null && connectedToServer) {
-            // If not found locally but connected to server, create a placeholder session
-            System.out.println("🔄 Creating placeholder session for network game");
-            gameSession = createPlaceholderSession(sessionId);
-        }
-
-        return gameSession;
-    }
-
-    private GameSession createPlaceholderSession(int sessionId) {
-        // Create a minimal session for network play
-        // In a real implementation, the server would send the full game state
-        ArrayList<Player> players = new ArrayList<>();
-        players.add(new Player(currentUser.getName(), currentUser.getEmail(), currentUser.getPassword()));
-
-        GameSession gameSession = new GameSession(players);
-        gameSession.setSessionId(sessionId);
-        return gameSession;
-    }
-
-    private InGamePlayer findOrCreatePlayerInSession(GameSession gameSession, User user) {
-        // First, try to find the player by username
-        for (InGamePlayer player : gameSession.getPlayers()) {
-            if (player.getPlayer().getName().equals(user.getName())) {
-                return player;
-            }
-        }
-
-        // If player not found, check if there's an empty slot
-        if (gameSession.getPlayers().size() < 6) { // Max players
-            // Create a new player and add to session
-            Player newPlayer = new Player(user.getName(), user.getEmail(), user.getPassword());
-            InGamePlayer newInGamePlayer = new InGamePlayer(newPlayer);
-
-            // Note: This is a simplified approach. In a real application,
-            // you would need to properly add the player to the game session
-            return newInGamePlayer;
-        }
-
-        return null;
-    }
-
-    private void openGameScreen(GameSession gameSession, InGamePlayer currentPlayer) {
-        frame.dispose();
-        GameScreen gameScreen = new GameScreen(gameSession, currentPlayer, gameClient);
-        gameScreen.display();
-        System.out.println("🎮 Opened game screen for session: " + gameSession.getSessionId());
+        detailsDialog.add(panel);
+        detailsDialog.setVisible(true);
     }
 
     private void logout() {
@@ -468,11 +225,6 @@ public class PlayerDashboard implements GameClient.MessageListener {
         );
 
         if (confirm == JOptionPane.YES_OPTION) {
-            // Disconnect from server if connected
-            if (gameClient != null) {
-                gameClient.disconnect();
-            }
-
             frame.dispose();
             new FirstScreen().display();
         }
@@ -495,31 +247,16 @@ public class PlayerDashboard implements GameClient.MessageListener {
                 } else {
                     setText(session.toString());
 
-                    // Color coding based on status and player count
+                    // Color coding based on status
                     if ("active".equals(session.getGameState())) {
-                        if (session.getJoinedPlayers() >= session.getPlayerCount()) {
-                            setBackground(isSelected ? new Color(255, 200, 200) : new Color(255, 240, 240));
-                            setForeground(Color.GRAY);
-                            setToolTipText("Session is full");
-                        } else {
-                            setBackground(isSelected ? new Color(200, 255, 200) : new Color(240, 255, 240));
-                            setForeground(Color.BLACK);
-                            setToolTipText("Active game - " + session.getJoinedPlayers() + "/" + session.getPlayerCount() + " players");
-                        }
+                        setBackground(isSelected ? new Color(200, 255, 200) : new Color(240, 255, 240));
+                        setForeground(Color.BLACK);
                     } else if ("waiting".equals(session.getGameState())) {
-                        if (session.getJoinedPlayers() >= session.getPlayerCount()) {
-                            setBackground(isSelected ? new Color(255, 200, 200) : new Color(255, 240, 240));
-                            setForeground(Color.GRAY);
-                            setToolTipText("Session is full");
-                        } else {
-                            setBackground(isSelected ? new Color(255, 255, 200) : new Color(255, 255, 240));
-                            setForeground(Color.BLACK);
-                            setToolTipText("Waiting for players - " + session.getJoinedPlayers() + "/" + session.getPlayerCount() + " joined");
-                        }
-                    } else {
-                        setBackground(isSelected ? new Color(255, 200, 200) : new Color(255, 240, 240));
-                        setForeground(Color.GRAY);
-                        setToolTipText("Session not available");
+                        setBackground(isSelected ? new Color(255, 255, 200) : new Color(255, 255, 240));
+                        setForeground(Color.BLACK);
+                    } else if ("completed".equals(session.getGameState())) {
+                        setBackground(isSelected ? new Color(230, 230, 255) : new Color(245, 245, 255));
+                        setForeground(Color.BLACK);
                     }
                 }
             }

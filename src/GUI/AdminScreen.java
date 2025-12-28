@@ -1,201 +1,284 @@
 package GUI;
 
 import javax.swing.*;
+import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.awt.event.*;
-import java.util.ArrayList;
-import java.util.List;
-import data_base_connection.UserRepository;
-import network.GameServer;
-import user.Player;
-import gameEngine.GameSession;
-import network.GameClient;
-import network.GameMessage;
+import gameEngine.GameType;
 
 /**
- * AdminScreen updated to call UserRepository.usernameExists(...) and GameClient.getPlayerName()
+ * AdminScreen - Redesigned for local multiplayer with sequential login
+ * Removed all network functionality
  */
-public class AdminScreen implements GameClient.MessageListener {
+public class AdminScreen {
     private JFrame frame;
     private JPanel mainPanel;
-    private JPanel playerSetupPanel;
-    private JPanel controlPanel;
+    private JComboBox<GameType> gameTypeComboBox;
     private JSpinner playerCountSpinner;
-    private ArrayList<JTextField> playerFields;
     private JButton createGameButton;
     private JButton backButton;
     private JLabel statusLabel;
 
-    private UserRepository userRepository;
-    private GameClient gameClient;
-    private GameSession currentGameSession;
-    private boolean connectedToServer = false;
-
     public AdminScreen() {
-        this.userRepository = new UserRepository();
-        this.gameClient = new GameClient("Admin", this);
-        this.playerFields = new ArrayList<>();
         initialize();
-        connectToServer();
     }
 
-    public void display() { frame.setVisible(true); }
+    public void display() {
+        frame.setVisible(true);
+    }
 
     private void initialize() {
         createFrame();
         createMainPanel();
-        createPlayerSetupSection();
+        createGameSetupSection();
         createControlPanel();
+
         frame.add(mainPanel);
         frame.setLocationRelativeTo(null);
     }
 
-    private void connectToServer() {
-        boolean success = gameClient.connect("localhost", 8080);
-        connectedToServer = success;
-
-        if (success) {
-            statusLabel.setText("Connected to game server - Ready to create sessions");
-            statusLabel.setForeground(Color.GREEN);
-        } else {
-            statusLabel.setText("Not connected to server - Local mode only");
-            statusLabel.setForeground(Color.ORANGE);
-        }
-    }
-
-    @Override
-    public void onMessageReceived(GameMessage message) {
-        SwingUtilities.invokeLater(() -> handleServerMessage(message));
-    }
-
-    @Override
-    public void onConnectionStatusChanged(boolean connected) {
-        connectedToServer = connected;
-        statusLabel.setText(connected ? "Connected to server" : "Disconnected from server");
-        statusLabel.setForeground(connected ? Color.GREEN : Color.RED);
-    }
-
-    private void handleServerMessage(GameMessage message) {
-        switch (message.getType()) {
-            case GameMessage.SESSION_CREATED:
-                handleSessionCreated(message);
-                break;
-            case GameMessage.ERROR:
-                handleError(message);
-                break;
-            case GameMessage.WELCOME:
-                statusLabel.setText("Connected to game server - Ready to create sessions");
-                statusLabel.setForeground(Color.GREEN);
-                break;
-            default:
-                // ignore other messages
-        }
-    }
-
-    private void handleError(GameMessage message) {
-        String payload = message.getData() != null ? message.getData().toString() : "Unknown error";
-        JOptionPane.showMessageDialog(frame, "Server error: " + payload, "Server Error", JOptionPane.ERROR_MESSAGE);
-    }
-
-    private void handleSessionCreated(GameMessage message) {
-        JOptionPane.showMessageDialog(frame, "Session created successfully", "Success", JOptionPane.INFORMATION_MESSAGE);
-    }
-
     private void createFrame() {
-        frame = new JFrame("Admin - Create Game Session");
-        frame.setSize(700, 500);
+        frame = new JFrame("Admin Panel - Create Local Game");
+        frame.setSize(600, 500);
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        frame.setMinimumSize(new Dimension(500, 400));
     }
 
     private void createMainPanel() {
-        mainPanel = new JPanel(new BorderLayout());
-        JLabel title = new JLabel("Create Game Session", SwingConstants.CENTER);
-        title.setFont(new Font("SansSerif", Font.BOLD, 20));
-        mainPanel.add(title, BorderLayout.NORTH);
-        playerSetupPanel = new JPanel();
-        mainPanel.add(playerSetupPanel, BorderLayout.CENTER);
+        mainPanel = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                // Try to load background image
+                try {
+                    ImageIcon backgroundIcon = new ImageIcon("Pictures/background.jpg");
+                    if (backgroundIcon.getIconWidth() != -1) {
+                        Image backgroundImage = backgroundIcon.getImage();
+                        g.drawImage(backgroundImage, 0, 0, getWidth(), getHeight(), this);
+                    } else {
+                        // Fallback gradient background
+                        Graphics2D g2d = (Graphics2D) g;
+                        Color color1 = new Color(30, 60, 90);
+                        Color color2 = new Color(10, 30, 50);
+                        GradientPaint gradient = new GradientPaint(0, 0, color1, getWidth(), getHeight(), color2);
+                        g2d.setPaint(gradient);
+                        g2d.fillRect(0, 0, getWidth(), getHeight());
+                    }
+                } catch (Exception e) {
+                    // Solid color fallback
+                    g.setColor(new Color(30, 60, 90));
+                    g.fillRect(0, 0, getWidth(), getHeight());
+                }
+            }
+        };
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
     }
 
-    private void createPlayerSetupSection() {
-        playerCountSpinner = new JSpinner(new SpinnerNumberModel(2, 2, 6, 1));
-        playerCountSpinner.addChangeListener(e -> rebuildPlayerFields());
-        playerFields.clear();
-        rebuildPlayerFields();
-        JPanel p = new JPanel(new GridLayout(0,1));
-        p.add(new JLabel("Player count:"));
-        p.add(playerCountSpinner);
-        playerSetupPanel.add(p);
-    }
+    private void createGameSetupSection() {
+        JPanel setupPanel = new JPanel(new GridBagLayout());
+        setupPanel.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 10, 10, 10);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
 
-    private void rebuildPlayerFields() {
-        int count = (Integer) playerCountSpinner.getValue();
-        playerFields.clear();
-        playerSetupPanel.removeAll();
-        JPanel p = new JPanel(new GridLayout(count + 1, 1, 4, 4));
-        p.add(new JLabel("Enter usernames for each player (registered accounts only):"));
-        for (int i = 0; i < count; i++) {
-            JTextField tf = new JTextField();
-            playerFields.add(tf);
-            p.add(tf);
-        }
-        playerSetupPanel.add(p);
-        playerSetupPanel.revalidate();
-        playerSetupPanel.repaint();
+        // Title
+        JLabel titleLabel = new JLabel("Create Local Multiplayer Game", SwingConstants.CENTER);
+        titleLabel.setFont(new Font("Arial", Font.BOLD, 24));
+        titleLabel.setForeground(new Color(255, 215, 0));
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 2;
+        gbc.anchor = GridBagConstraints.CENTER;
+        gbc.insets = new Insets(0, 0, 30, 0);
+        setupPanel.add(titleLabel, gbc);
+
+        // Instructions
+        JTextArea instructionText = new JTextArea(
+                "Game Setup Instructions:\n\n" +
+                        "1. Select the game type from the dropdown\n" +
+                        "2. Choose the number of players (2-6)\n" +
+                        "3. Click 'Create Game' to start\n" +
+                        "4. Players will login one by one\n" +
+                        "5. Each player will get their own game window"
+        );
+        instructionText.setFont(new Font("Arial", Font.PLAIN, 14));
+        instructionText.setForeground(Color.WHITE);
+        instructionText.setOpaque(false);
+        instructionText.setEditable(false);
+        instructionText.setLineWrap(true);
+        instructionText.setWrapStyleWord(true);
+        instructionText.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(100, 150, 200), 2),
+                BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        ));
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        gbc.gridwidth = 2;
+        gbc.insets = new Insets(0, 0, 30, 0);
+        setupPanel.add(instructionText, gbc);
+
+        // Game Type Selection
+        JLabel gameTypeLabel = new JLabel("Game Type:");
+        gameTypeLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        gameTypeLabel.setForeground(Color.WHITE);
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        gbc.gridwidth = 1;
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.LINE_END;
+        setupPanel.add(gameTypeLabel, gbc);
+
+        gameTypeComboBox = new JComboBox<>(GameType.values());
+        gameTypeComboBox.setFont(new Font("Arial", Font.PLAIN, 14));
+        gameTypeComboBox.setPreferredSize(new Dimension(200, 30));
+        gbc.gridx = 1;
+        gbc.gridy = 2;
+        gbc.anchor = GridBagConstraints.LINE_START;
+        setupPanel.add(gameTypeComboBox, gbc);
+
+        // Player Count Selection
+        JLabel playerCountLabel = new JLabel("Number of Players:");
+        playerCountLabel.setFont(new Font("Arial", Font.BOLD, 16));
+        playerCountLabel.setForeground(Color.WHITE);
+        gbc.gridx = 0;
+        gbc.gridy = 3;
+        gbc.anchor = GridBagConstraints.LINE_END;
+        setupPanel.add(playerCountLabel, gbc);
+
+        playerCountSpinner = new JSpinner(new SpinnerNumberModel(4, 2, 6, 1));
+        playerCountSpinner.setFont(new Font("Arial", Font.BOLD, 14));
+        playerCountSpinner.setPreferredSize(new Dimension(80, 30));
+        gbc.gridx = 1;
+        gbc.gridy = 3;
+        gbc.anchor = GridBagConstraints.LINE_START;
+        setupPanel.add(playerCountSpinner, gbc);
+
+        // Empty space
+        JPanel emptyPanel = new JPanel();
+        emptyPanel.setOpaque(false);
+        gbc.gridx = 0;
+        gbc.gridy = 4;
+        gbc.gridwidth = 2;
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.VERTICAL;
+        setupPanel.add(emptyPanel, gbc);
+
+        mainPanel.add(setupPanel, BorderLayout.CENTER);
     }
 
     private void createControlPanel() {
-        controlPanel = new JPanel();
-        createGameButton = new JButton("Create Session");
-        createGameButton.addActionListener(e -> createGameSession());
+        JPanel controlPanel = new JPanel(new BorderLayout());
+        controlPanel.setOpaque(false);
+        controlPanel.setBorder(BorderFactory.createEmptyBorder(20, 0, 0, 0));
 
-        backButton = new JButton("Back");
-        backButton.addActionListener(e -> frame.dispose());
+        // Status panel
+        JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        statusPanel.setOpaque(false);
+        statusLabel = new JLabel("Ready to create local multiplayer game", SwingConstants.CENTER);
+        statusLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        statusLabel.setForeground(Color.GREEN);
+        statusPanel.add(statusLabel);
 
-        controlPanel.add(createGameButton);
-        controlPanel.add(backButton);
+        // Button panel
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 30, 10));
+        buttonPanel.setOpaque(false);
 
-        statusLabel = new JLabel("Not connected");
+        createGameButton = createStyledButton("Create Game", new Color(0, 150, 0));
+        createGameButton.setPreferredSize(new Dimension(150, 45));
+        createGameButton.setFont(new Font("Arial", Font.BOLD, 16));
+        createGameButton.addActionListener(e -> createGame());
+
+        backButton = createStyledButton("Back to Main", new Color(150, 150, 150));
+        backButton.setPreferredSize(new Dimension(150, 45));
+        backButton.setFont(new Font("Arial", Font.BOLD, 16));
+        backButton.addActionListener(e -> goBackToMain());
+
+        buttonPanel.add(createGameButton);
+        buttonPanel.add(backButton);
+
+        controlPanel.add(statusPanel, BorderLayout.NORTH);
+        controlPanel.add(buttonPanel, BorderLayout.CENTER);
         mainPanel.add(controlPanel, BorderLayout.SOUTH);
-        mainPanel.add(statusLabel, BorderLayout.SOUTH);
     }
 
-    private void createGameSession() {
-        int playerCount = (Integer) playerCountSpinner.getValue();
-        List<String> playerNames = new ArrayList<>();
+    private JButton createStyledButton(String text, Color color) {
+        JButton button = new JButton(text);
+        button.setFont(new Font("Arial", Font.BOLD, 14));
+        button.setBackground(color);
+        button.setForeground(Color.WHITE);
+        button.setFocusPainted(false);
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(darkerColor(color), 2),
+                BorderFactory.createEmptyBorder(10, 15, 10, 15)
+        ));
+        button.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        button.setOpaque(true);
 
-        if (playerFields.size() != playerCount) {
-            JOptionPane.showMessageDialog(frame, "Player fields mismatch", "Error", JOptionPane.ERROR_MESSAGE);
+        button.addMouseListener(new MouseAdapter() {
+            public void mouseEntered(MouseEvent evt) {
+                button.setBackground(brighterColor(color));
+            }
+            public void mouseExited(MouseEvent evt) {
+                button.setBackground(color);
+            }
+        });
+
+        return button;
+    }
+
+    private Color brighterColor(Color color) {
+        return new Color(
+                Math.min(255, color.getRed() + 30),
+                Math.min(255, color.getGreen() + 30),
+                Math.min(255, color.getBlue() + 30)
+        );
+    }
+
+    private Color darkerColor(Color color) {
+        return new Color(
+                Math.max(0, color.getRed() - 30),
+                Math.max(0, color.getGreen() - 30),
+                Math.max(0, color.getBlue() - 30)
+        );
+    }
+
+    private void createGame() {
+        GameType selectedGameType = (GameType) gameTypeComboBox.getSelectedItem();
+        int playerCount = (Integer) playerCountSpinner.getValue();
+
+        if (selectedGameType == null) {
+            JOptionPane.showMessageDialog(frame,
+                    "Please select a game type",
+                    "Selection Required",
+                    JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        for (int i = 0; i < playerCount; i++) {
-            String username = playerFields.get(i).getText().trim();
-            if (username.isEmpty()) {
-                JOptionPane.showMessageDialog(frame, "All player slots must be filled with registered usernames. No AI allowed.", "Validation error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            if (!userRepository.usernameExists(username)) {
-                JOptionPane.showMessageDialog(frame, "User '" + username + "' is not registered. Please register before adding them to the session.", "User not found", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            playerNames.add(username);
-        }
+        // Confirm game creation
+        int confirm = JOptionPane.showConfirmDialog(frame,
+                String.format("Create a %s game with %d players?\n\n" +
+                                "Players will login one by one.",
+                        selectedGameType.getDisplayName(), playerCount),
+                "Confirm Game Creation",
+                JOptionPane.YES_NO_OPTION);
 
-        String hostName = gameClient.getPlayerName();
-        if (hostName == null || hostName.trim().isEmpty()) hostName = "Admin";
+        if (confirm == JOptionPane.YES_OPTION) {
+            // Start sequential login flow
+            frame.dispose();  // Close admin screen
 
-        if (connectedToServer) {
-            GameMessage.CreateSessionData data = new GameMessage.CreateSessionData(hostName, playerCount, playerNames);
-            gameClient.sendMessage(new GameMessage(GameMessage.CREATE_SESSION, hostName, data));
-            statusLabel.setText("Session creation requested...");
-        } else {
-            ArrayList<Player> players = new ArrayList<>();
-            for (String uname : playerNames) players.add(new Player(uname, uname + "@game.com", "local"));
-            GameSession localSession = new GameSession(players);
-            localSession.setSessionId(0);
-            localSession.setNetworkGame(false);
-            localSession.startGame();
-            JOptionPane.showMessageDialog(frame, "Local session created and started", "Local Mode", JOptionPane.INFORMATION_MESSAGE);
+            PlayerLoginFlow.startNewGame(frame, selectedGameType, playerCount);
         }
+    }
+
+    private void goBackToMain() {
+        frame.dispose();
+        new FirstScreen().display();
+    }
+
+    public static void main(String[] args) {
+        // For testing the admin screen
+        SwingUtilities.invokeLater(() -> {
+            new AdminScreen().display();
+        });
     }
 }

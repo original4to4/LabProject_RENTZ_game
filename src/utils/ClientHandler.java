@@ -1,12 +1,15 @@
+/*
 package network;
 
 import java.io.*;
 import java.net.*;
 
+*/
 /**
  * Runs inside the player app.
  * Connects to the admin server and exchanges messages.
- */
+ *//*
+
 public class ClientHandler {
 
     private Socket socket;
@@ -14,7 +17,9 @@ public class ClientHandler {
     private BufferedReader in;
     private boolean connected = false;
 
-    /** Connect to the admin server (use "localhost" for same PC) */
+    */
+/** Connect to the admin server (use "localhost" for same PC) *//*
+
     public boolean connect(String host, int port) {
         try {
             socket = new Socket(host, port);
@@ -43,14 +48,18 @@ public class ClientHandler {
         }
     }
 
-    /** Send message to the server */
+    */
+/** Send message to the server *//*
+
     public void send(String message) {
         if (connected && out != null) {
             out.println(message);
         }
     }
 
-    /** Close connection */
+    */
+/** Close connection *//*
+
     public void disconnect() {
         try {
             connected = false;
@@ -61,3 +70,4 @@ public class ClientHandler {
         }
     }
 }
+*/

@@ -1,3 +1,4 @@
+/*
 package network;
 
 import user.Player;
@@ -281,4 +282,4 @@ public class ClientThread extends Thread {
     public boolean isConnected() { return connected; }
     public String getClientId() { return clientId; }
     public String getPlayerName() { return playerName; }
-}
+}*/
